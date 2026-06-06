@@ -335,29 +335,41 @@ def send_email(subject, html):
 # 4.5 发布到 GitHub Pages（写 docs/ 供工作流提交）
 # ----------------------------------------------------------------------------
 def publish_pages(dash, html):
-    """把当日报告写入 docs/{dash}.html、docs/latest.html，并重建 docs/index.html 列表。"""
+    """根 index.html = 最新一期报告（顶部带历史入口）；archive.html = 历史列表；
+    docs/{dash}.html = 当期存档。这样打开站点根地址永远是最新报告。"""
     os.makedirs("docs", exist_ok=True)
+    # 1) 当期存档
     with open(f"docs/{dash}.html", "w", encoding="utf-8") as f:
         f.write(html)
-    with open("docs/latest.html", "w", encoding="utf-8") as f:
-        f.write(html)
+    # 2) 根 index = 最新报告本体 + 顶部历史入口条
+    nav = ('<div style="max-width:680px;margin:0 auto;padding:10px 20px;text-align:right;">'
+           '<a href="archive.html" style="color:#2563eb;font-size:13px;text-decoration:none;">'
+           '📅 查看历史报告 &rsaquo;</a></div>')
+    anchor = '<div style="max-width:680px;margin:0 auto;padding:20px;">'
+    index_html = html.replace(anchor, nav + anchor, 1)
+    with open("docs/index.html", "w", encoding="utf-8") as f:
+        f.write(index_html)
+    # 3) 历史列表页
     files = sorted([fn for fn in os.listdir("docs")
                     if re.match(r"\d{4}-\d{2}-\d{2}\.html$", fn)], reverse=True)
     items = "\n".join(f'<li><a href="{fn}">{fn[:-5]}</a></li>' for fn in files)
-    index = (
+    archive = (
         '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>A股每日复盘</title></head>'
+        '<title>A股每日复盘 · 历史</title></head>'
         '<body style="font-family:-apple-system,Microsoft YaHei,sans-serif;max-width:680px;'
         'margin:0 auto;padding:24px;color:#1f2329;">'
+        '<p><a href="index.html" style="color:#2563eb;text-decoration:none;">&lsaquo; 返回最新一期</a></p>'
         '<h2>📊 A股每日复盘 · 历史报告</h2>'
-        '<p><a href="latest.html"><b>👉 查看最近一期</b></a></p>'
         f'<ul style="line-height:2;">{items}</ul>'
         '<p style="color:#9ca3af;font-size:12px;">每个交易日 18:00 自动更新 · '
         '数据仅供参考，不构成投资建议</p></body></html>'
     )
-    with open("docs/index.html", "w", encoding="utf-8") as f:
-        f.write(index)
+    with open("docs/archive.html", "w", encoding="utf-8") as f:
+        f.write(archive)
+    # 兼容旧链接：latest.html 仍指向最新
+    with open("docs/latest.html", "w", encoding="utf-8") as f:
+        f.write(index_html)
     print("pages published:", dash)
 
 
