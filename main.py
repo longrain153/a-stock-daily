@@ -83,36 +83,43 @@ def _clean_board_name(name):
     return name.rstrip(_ROMAN).strip()
 
 
-def fetch_sectors():
-    """东方财富申万行业板块榜（已验证海外可达）。一次取全量按涨幅排序，
-    清洗层级后缀并去重，返回 (领涨top6, 领跌top6)。带重试防偶发限流。"""
-    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&fid=f3"
-           "&fs=m:90+t:2&fields=f3,f14&ut=fa5fd1943c7b386f172d6893dbfba10b")
+def _em_board(po):
+    """取东方财富申万行业榜单一方向(po=1涨幅榜/po=0跌幅榜)前10，带重试。
+    注意：pz 必须小(过大如500会返回空body)。"""
+    import time
+    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=12&np=1&fid=f3"
+           "&fs=m:90+t:2&fields=f3,f14&ut=fa5fd1943c7b386f172d6893dbfba10b&po=" + str(po))
     h = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
-    diff = None
     for i in range(4):
         try:
             d = requests.get(url, headers=h, timeout=20).json()
             diff = (d.get("data") or {}).get("diff")
             if diff:
-                break
+                return diff
         except Exception as e:
-            print(f"sectors attempt {i} failed:", e)
-        import time
+            print(f"sectors po={po} attempt {i} failed:", e)
         time.sleep(0.8 * (i + 1))
-    if not diff:
-        print("sectors: all attempts failed")
-        return [], []
+    return None
 
-    seen, boards = set(), []
-    for x in diff:                          # 已按 f3 降序
+
+def _dedupe_clean(diff):
+    """清洗层级后缀并去重，保持原顺序。"""
+    seen, out = set(), []
+    for x in diff or []:
         nm = _clean_board_name(x["f14"])
         if not nm or nm in seen:
             continue
         seen.add(nm)
-        boards.append({"name": nm, "pct": round(x["f3"] / 100, 2)})
-    up = boards[:6]
-    down = [b for b in reversed(boards) if b["pct"] < 0][:6]
+        out.append({"name": nm, "pct": round(x["f3"] / 100, 2)})
+    return out
+
+
+def fetch_sectors():
+    """东方财富申万行业板块涨幅/跌幅榜（已验证海外可达）。"""
+    up = _dedupe_clean(_em_board(1))[:6]
+    down = _dedupe_clean(_em_board(0))[:6]
+    if not up and not down:
+        print("sectors: all attempts failed")
     return up, down
 
 
