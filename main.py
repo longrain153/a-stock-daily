@@ -75,8 +75,32 @@ def fetch_indices():
     return indices, data_date
 
 
-def fetch_sectors():
-    """行业板块涨幅/跌幅榜（东方财富）。"""
+def _sectors_sina():
+    """新浪行业板块榜（海外可达）。返回全部板块 list[{name,pct}]。"""
+    url = "https://vip.stock.finance.sina.com.cn/q/view/newSinaHy.php"
+    h = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.sina.com.cn/"}
+    boards = []
+    try:
+        r = requests.get(url, headers=h, timeout=20)
+        r.encoding = "gbk"
+        txt = r.text
+        obj = txt[txt.find("{"): txt.rfind("}") + 1]
+        d = json.loads(obj)
+        for v in d.values():
+            f = v.split(",")
+            if len(f) < 6:
+                continue
+            try:
+                boards.append({"name": f[1], "pct": round(float(f[5]), 2)})
+            except ValueError:
+                continue
+    except Exception as e:
+        print("sectors sina failed:", e)
+    return boards
+
+
+def _sectors_eastmoney():
+    """东方财富行业板块榜（海外常被限制，作备用）。"""
     base = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=6&np=1&fid=f3"
             "&fs=m:90+t:2&fields=f3,f14&ut=fa5fd1943c7b386f172d6893dbfba10b&po=")
     h = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
@@ -87,8 +111,20 @@ def fetch_sectors():
             for x in d["data"]["diff"]:
                 bucket.append({"name": x["f14"], "pct": round(x["f3"] / 100, 2)})
         except Exception as e:
-            print("sectors po=%s failed:" % po, e)
+            print("sectors eastmoney po=%s failed:" % po, e)
     return up, down
+
+
+def fetch_sectors():
+    """行业板块涨幅/跌幅榜。优先新浪(海外可达)，失败再试东方财富。"""
+    boards = _sectors_sina()
+    if boards:
+        boards.sort(key=lambda x: x["pct"], reverse=True)
+        up = boards[:6]
+        down = [b for b in boards[::-1] if b["pct"] < 0][:6]
+        return up, down
+    print("sectors: fallback to eastmoney")
+    return _sectors_eastmoney()
 
 
 def fetch_limitup(ymd):
