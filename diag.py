@@ -1,38 +1,28 @@
 # -*- coding: utf-8 -*-
-"""诊断4：找非东财、海外可达、含板块涨跌榜的网页(用于web兜底+DeepSeek提取)。"""
+"""诊断5：同花顺行业板块 ajax 数据接口（带涨跌幅的表格）。"""
 import re
 import requests
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
-KW = ["半导体", "通信设备", "航天", "元件", "电机", "板块", "领涨", "领跌"]
+H = {"User-Agent": UA, "Referer": "https://q.10jqka.com.cn/thshy/"}
 
 
-def show(tag, url, enc=None, headers=None):
+def show(tag, url, enc="gbk"):
     try:
-        r = requests.get(url, headers=headers or {"User-Agent": UA}, timeout=20)
-        if enc:
-            r.encoding = enc
+        r = requests.get(url, headers=H, timeout=20)
+        r.encoding = enc
         t = r.text
-        hits = [k for k in KW if k in t]
-        # 抓几个 "名字+百分比" 样例
-        pcts = re.findall(r"[一-龥]{2,8}[^\d%]{0,6}(?:-|\+)?\d+\.\d{1,2}%", t)[:4]
-        print(f"[{tag}] HTTP {r.status_code} len={len(t)} kw={hits} pctSamples={pcts}")
+        # 提取 板块名 + 百分比 对
+        pairs = re.findall(r'<a[^>]*>([一-龥A-Za-z0-9]{2,10})</a>.{0,200?}?(-?\d+\.\d{2})%', t)
+        names = re.findall(r'/code/\d+/[^>]*>([一-龥]{2,10})<', t)
+        pcts = re.findall(r'(-?\d+\.\d{2})%', t)
+        print(f"[{tag}] HTTP {r.status_code} len={len(t)} names={names[:8]} pcts={pcts[:8]}")
     except Exception as e:
         print(f"[{tag}] ERROR {e}")
     print("-" * 55)
 
 
-# 1. 同花顺 行业板块页(HTML)
-show("ths-thshy", "https://q.10jqka.com.cn/thshy/")
-# 2. 同花顺 板块数据接口(尝试)
-show("ths-api", "https://q.10jqka.com.cn/api/v1/plate/list/field/199112/order/desc/page/1/size/10/type/THS")
-# 3. 财联社 电报
-show("cls-tele", "https://www.cls.cn/telegraph")
-# 4. 证券时报
-show("stcn", "https://www.stcn.com/article/list/gs.html")
-# 5. 新浪 行业(申万) 板块页
-show("sina-bk", "https://vip.stock.finance.sina.com.cn/mkt/#industry_swl2", enc="gbk")
-# 6. 雪球 行业板块(可能需token)
-show("xq", "https://xueqiu.com/hq")
-# 7. 东财行业HTML页(对照，可能同样限流)
-show("em-html", "https://quote.eastmoney.com/center/boardlist.html")
+# 涨幅榜（field 199112 = 涨跌幅, order desc）
+show("ths-up", "https://q.10jqka.com.cn/thshy/index/field/199112/order/desc/page/1/ajax/1/")
+# 跌幅榜（order asc）
+show("ths-down", "https://q.10jqka.com.cn/thshy/index/field/199112/order/asc/page/1/ajax/1/")
