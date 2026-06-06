@@ -39,5 +39,6 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           FORCE_SEND: ${{ github.event.inputs.force }}
         run: python main.py
