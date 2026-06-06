@@ -351,10 +351,8 @@ def main():
             pass
 
     up, down = fetch_sectors()
-    print("SECTORS up:", [f'{b["name"]} {b["pct"]:+}%' for b in up])
-    print("SECTORS down:", [f'{b["name"]} {b["pct"]:+}%' for b in down])
     limitup = fetch_limitup(ymd)
-    print("HOT(limitup):", [f'{h["name"]}({h["count"]})' for h in (limitup or {}).get("hotSectors", [])])
+    print(f"sectors up={len(up)} down={len(down)} hot={len((limitup or {}).get('hotSectors', []))}")
     news = fetch_news()
     analysis = deepseek_analyze(dash, indices, up, down, limitup, news)
 
