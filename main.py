@@ -322,6 +322,53 @@ def send_email(subject, html):
 
 
 # ----------------------------------------------------------------------------
+# 5. 微信推送（Server酱，可选；best-effort，失败不影响邮件）
+# ----------------------------------------------------------------------------
+def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, analysis):
+    """生成简洁的微信 markdown 摘要。"""
+    lines = []
+    for x in indices:
+        amt = f"，成交{x['amount_yi']:.0f}亿" if x.get("amount_yi") else ""
+        lines.append(f"- {x['name']}：{x['close']} （{x['pct']:+}%{amt}）")
+    idx_block = "\n".join(lines)
+
+    def top(lst, n=3):
+        return "、".join(f'{b["name"]}{b["pct"]:+}%' for b in lst[:n]) if lst else "—"
+
+    lu = "—"
+    if limitup and limitup.get("count") is not None:
+        lu = f'{limitup["count"]}家'
+    hot = (limitup or {}).get("hotSectors") or []
+    hot_s = "、".join(f'{h["name"]}({h["count"]})' for h in hot[:4]) if hot else "—"
+
+    strat = (analysis or {}).get("strategy", "") or ""
+
+    md = (
+        f"**大盘指数**\n{idx_block}\n\n"
+        f"**板块**\n- 领涨：{top(up)}\n- 领跌：{top(down)}\n- 涨停：{lu}　集中：{hot_s}\n\n"
+        f"**次日策略**\n{strat}\n\n"
+        f"> 完整复盘报告（含消息面/AI解读）已发至邮箱。"
+    )
+    return md
+
+
+def send_wechat(title, md):
+    key = os.environ.get("SERVERCHAN_KEY")
+    if not key:
+        return
+    try:
+        url = f"https://sctapi.ftqq.com/{key}.send"
+        r = requests.post(url, data={"title": title, "desp": md}, timeout=20)
+        j = r.json()
+        if j.get("code") == 0:
+            print("wechat pushed via serverchan")
+        else:
+            print("wechat push non-zero:", j.get("code"), j.get("message"))
+    except Exception as e:
+        print("wechat push failed:", e)
+
+
+# ----------------------------------------------------------------------------
 def main():
     now = beijing_now()
     dash = now.strftime("%Y-%m-%d")
@@ -359,6 +406,11 @@ def main():
 
     html = build_html(dash, weekday_cn, indices, up, down, limitup, analysis)
     send_email(f"A股每日复盘 {dash}", html)
+
+    # 微信推送（可选）：上证涨跌作标题
+    sse = next((x for x in indices if "上证" in x["name"]), None)
+    wtitle = f"A股复盘 {dash}" + (f" 沪指{sse['pct']:+}%" if sse else "")
+    send_wechat(wtitle, build_wechat_md(dash, weekday_cn, indices, up, down, limitup, analysis))
 
 
 if __name__ == "__main__":
