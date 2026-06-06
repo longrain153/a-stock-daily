@@ -75,48 +75,39 @@ def fetch_indices():
     return indices, data_date
 
 
-_ROMAN = "ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ"
-
-
-def _clean_board_name(name):
-    """去掉申万层级后缀(如 航天装备Ⅲ -> 航天装备)。"""
-    return name.rstrip(_ROMAN).strip()
-
-
-def _em_board(po):
-    """取东方财富申万行业榜单一方向(po=1涨幅榜/po=0跌幅榜)。
-    关键：push2 连发到第3次会被限流(502)，所以这里每方向只请求1次，不重试。"""
-    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=12&po=" + str(po) +
-           "&np=1&fid=f3&fs=m:90+t:2&fields=f3,f14&ut=fa5fd1943c7b386f172d6893dbfba10b")
-    h = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+def _ths_board(order):
+    """同花顺行业板块榜(申万口径，海外可达，无东财式限流)。
+    order='desc'取涨幅榜，'asc'取跌幅榜。解析HTML表格：第2列板块名、第3列涨跌幅。"""
+    url = (f"https://q.10jqka.com.cn/thshy/index/field/199112/order/{order}/page/1/ajax/1/")
+    h = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+         "Referer": "https://q.10jqka.com.cn/thshy/"}
     try:
-        d = requests.get(url, headers=h, timeout=20).json()
-        return (d.get("data") or {}).get("diff")
+        r = requests.get(url, headers=h, timeout=20)
+        r.encoding = "gbk"
+        out = []
+        for row in re.findall(r"<tr[^>]*>(.*?)</tr>", r.text, re.S):
+            cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.S)
+            if len(cells) < 3:
+                continue
+            nm = re.search(r">([^<]+)</a>", cells[1])
+            num = re.search(r"-?\d+\.\d+", cells[2])   # 必含小数点，避开整数家数列
+            if nm and num:
+                out.append({"name": nm.group(1).strip(), "pct": float(num.group(0))})
+        return out
     except Exception as e:
-        print(f"sectors po={po} failed:", e)
-        return None
-
-
-def _dedupe_clean(diff):
-    """清洗层级后缀并去重，保持原顺序。"""
-    seen, out = set(), []
-    for x in diff or []:
-        nm = _clean_board_name(x["f14"])
-        if not nm or nm in seen:
-            continue
-        seen.add(nm)
-        out.append({"name": nm, "pct": round(x["f3"] / 100, 2)})
-    return out
+        print(f"ths board {order} failed:", e)
+        return []
 
 
 def fetch_sectors():
-    """东方财富申万行业涨幅/跌幅榜。恰好2次请求(涨/跌)，方向间留间隔避免限流。"""
+    """同花顺申万行业涨幅/跌幅榜。涨幅榜(desc)取领涨、跌幅榜(asc)取领跌，各前6。"""
     import time
-    up = _dedupe_clean(_em_board(1))[:6]
-    time.sleep(1.5)
-    down = _dedupe_clean(_em_board(0))[:6]
+    up = _ths_board("desc")[:6]
+    time.sleep(0.8)
+    down = _ths_board("asc")[:6]
     if not up and not down:
-        print("sectors: eastmoney unavailable (will rely on limit-up hot sectors)")
+        print("sectors: THS unavailable (will rely on limit-up hot sectors)")
     return up, down
 
 
@@ -305,7 +296,7 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
     <div style="font-size:17px;font-weight:700;border-left:4px solid #2563eb;padding-left:10px;margin-bottom:14px;">四、次日策略提示</div>
     <div style="font-size:14px;line-height:1.9;color:#374151;">{strat}</div>
     <div style="margin-top:14px;padding:12px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;color:#6b7280;line-height:1.7;">
-      以上为行情信息梳理，<b>不构成任何投资建议</b>。数据来源：指数=新浪财经，板块/涨停=东方财富；分析由 DeepSeek 生成，可能存在错漏，请以交易所正式数据为准。
+      以上为行情信息梳理，<b>不构成任何投资建议</b>。数据来源：指数=新浪财经，板块=同花顺，涨停=东方财富；分析由 DeepSeek 生成，可能存在错漏，请以交易所正式数据为准。
     </div>
   </div>
   <div style="text-align:center;color:#9ca3af;font-size:12px;padding:16px;">A股Agent · 云端自动推送 · {date_str}</div>
@@ -362,7 +353,8 @@ def main():
 
     up, down = fetch_sectors()
     limitup = fetch_limitup(ymd)
-    print(f"sectors up={len(up)} down={len(down)} hot={len((limitup or {}).get('hotSectors', []))}")
+    print("UP:", [f'{b["name"]} {b["pct"]:+}%' for b in up])
+    print("DOWN:", [f'{b["name"]} {b["pct"]:+}%' for b in down])
     news = fetch_news()
     analysis = deepseek_analyze(dash, indices, up, down, limitup, news)
 
