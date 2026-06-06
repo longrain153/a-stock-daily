@@ -325,29 +325,41 @@ def send_email(subject, html):
 # 5. 微信推送（Server酱，可选；best-effort，失败不影响邮件）
 # ----------------------------------------------------------------------------
 def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, analysis):
-    """生成简洁的微信 markdown 摘要。"""
-    lines = []
-    for x in indices:
-        amt = f"，成交{x['amount_yi']:.0f}亿" if x.get("amount_yi") else ""
-        lines.append(f"- {x['name']}：{x['close']} （{x['pct']:+}%{amt}）")
-    idx_block = "\n".join(lines)
+    """生成完整版微信 markdown（点开消息可看渲染后的表格与全部四部分）。"""
+    a = analysis or {}
 
-    def top(lst, n=3):
-        return "、".join(f'{b["name"]}{b["pct"]:+}%' for b in lst[:n]) if lst else "—"
+    # 一、指数表格
+    rows = ["| 指数 | 收盘 | 涨跌幅 | 成交额 |", "|---|--:|--:|--:|"]
+    for x in indices:
+        amt = f"{x['amount_yi']:.0f}亿" if x.get("amount_yi") else "—"
+        rows.append(f"| {x['name']} | {x['close']} | {x['pct']:+}% | {amt} |")
+    idx_table = "\n".join(rows)
 
     lu = "—"
     if limitup and limitup.get("count") is not None:
         lu = f'{limitup["count"]}家'
     hot = (limitup or {}).get("hotSectors") or []
-    hot_s = "、".join(f'{h["name"]}({h["count"]})' for h in hot[:4]) if hot else "—"
+    hot_s = "、".join(f'{h["name"]}({h["count"]}家)' for h in hot[:6]) if hot else "—"
 
-    strat = (analysis or {}).get("strategy", "") or ""
+    def line(lst):
+        return "、".join(f'{b["name"]}{b["pct"]:+}%' for b in lst[:6]) if lst else "数据暂缺"
+
+    if up or down:
+        sec_block = f"**领涨**：{line(up)}\n\n**领跌**：{line(down)}\n\n**涨停集中板块**：{hot_s}"
+    else:
+        sec_block = f"（行业涨跌幅榜暂缺）**涨停集中板块**：{hot_s}"
+
+    news = (a.get("news_summary") or "暂无").replace("\n", "\n\n")
 
     md = (
-        f"**大盘指数**\n{idx_block}\n\n"
-        f"**板块**\n- 领涨：{top(up)}\n- 领跌：{top(down)}\n- 涨停：{lu}　集中：{hot_s}\n\n"
-        f"**次日策略**\n{strat}\n\n"
-        f"> 完整复盘报告（含消息面/AI解读）已发至邮箱。"
+        f"### 一、大盘指数复盘\n{idx_table}\n\n"
+        f"{a.get('index_comment', '')}\n\n"
+        f"**涨停家数**：{lu}　**北向资金**：未披露\n\n"
+        f"### 二、板块与热点\n{sec_block}\n\n{a.get('sector_comment', '')}\n\n"
+        f"### 三、消息面与政策\n{news}\n\n"
+        f"### 四、次日策略提示\n{a.get('strategy', '')}\n\n"
+        f"---\n*数据：指数=新浪 板块=同花顺 涨停=东财；分析由DeepSeek生成。"
+        f"以上为信息梳理，不构成投资建议。完整带样式版见邮件。*"
     )
     return md
 
