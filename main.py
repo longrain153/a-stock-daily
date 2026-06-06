@@ -140,19 +140,26 @@ def fetch_limitup(ymd):
 
 
 def fetch_news():
-    """best-effort 抓取财经快讯标题（东方财富7x24）。失败返回[]。"""
+    """东方财富 7x24 快讯。返回 [{title, summary, url}]，url 由 code 构造
+    （已验证 finance.eastmoney.com/a/{code}.html 可访问且内容匹配）。失败返回[]。"""
     try:
         u = ("https://np-weblist.eastmoney.com/comm/web/getFastNewsList?"
-             "client=web&biz=web_724&fastColumn=102&sortEnd=&pageSize=12&req_trace=1")
+             "client=web&biz=web_724&fastColumn=102&sortEnd=&pageSize=20&req_trace=1")
         d = requests.get(u, headers={"User-Agent": "Mozilla/5.0",
                                      "Referer": "https://kuaixun.eastmoney.com/"}, timeout=20).json()
-        items = d.get("data", {}).get("fastNewsList", []) or []
-        titles = []
+        items = ((d.get("data") or {}).get("fastNewsList")) or []
+        out = []
         for it in items:
-            t = (it.get("title") or it.get("summary") or "").strip()
-            if t:
-                titles.append(t[:80])
-        return titles[:10]
+            code = it.get("code")
+            title = (it.get("title") or "").strip()
+            if not code or not title:
+                continue
+            out.append({
+                "title": title,
+                "summary": (it.get("summary") or "").strip(),
+                "url": f"https://finance.eastmoney.com/a/{code}.html",
+            })
+        return out[:15]
     except Exception as e:
         print("news failed:", e)
         return []
@@ -165,23 +172,31 @@ def deepseek_analyze(date_str, indices, up, down, limitup, news):
     api_key = os.environ.get("DEEPSEEK_API_KEY")
     if not api_key:
         return None
+    news_lines = []
+    for i, n in enumerate(news or []):
+        s = n.get("summary") or n.get("title") or ""
+        news_lines.append(f"[{i}] {s[:90]}")
+    news_txt = "\n".join(news_lines) if news_lines else "（无快讯）"
+
     data_txt = {
         "日期": date_str,
         "指数": indices,
         "领涨板块": up,
         "领跌板块": down,
         "涨停": limitup,
-        "财经快讯标题": news,
     }
     sys = ("你是资深A股市场分析师。基于提供的当日真实行情数据，写一份客观、专业的收盘复盘。"
-           "只依据给定数据与标题，不要编造不存在的数字。返回严格的JSON。")
+           "只依据给定数据与快讯，不要编造不存在的数字或新闻。返回严格的JSON。")
     user = (
         "以下是今天A股的真实数据(JSON)：\n" + json.dumps(data_txt, ensure_ascii=False) +
+        "\n\n今日财经快讯列表(带序号)：\n" + news_txt +
         "\n\n请输出JSON，字段如下，全部用中文：\n"
         "{\n"
         '  "index_comment": "对四大指数与成交额的解读，3-4句",\n'
         '  "sector_comment": "对领涨领跌板块与涨停情况的解读及市场主线判断，3-4句",\n'
-        '  "news_summary": "结合财经快讯标题(若为空则说明无实时快讯，仅据盘面)梳理影响市场的消息面，3-5条，用分号或换行分隔",\n'
+        '  "news": [{"idx": 序号, "impact": "这条对A股的一句话影响"}],  '
+        "// 从上面快讯列表中挑选对A股最有影响的3-6条(政策/宏观/行业/重要公司/资金面)，"
+        "idx为列表中的序号整数；若列表为空则返回空数组\n"
         '  "strategy": "次日关注方向与风险提示，2-4句，不得出现具体买卖个股建议，结尾不需要免责声明"\n'
         "}"
     )
@@ -209,7 +224,26 @@ def color(v):
     return "#c0392b" if (v or 0) > 0 else ("#27ae60" if (v or 0) < 0 else "#6b7280")
 
 
-def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
+def resolve_news(news, analysis):
+    """把 DeepSeek 选中的 news[{idx,impact}] 映射回真实 {title,url,impact}。
+    DeepSeek 未选或异常时，回退为原始前 5 条快讯(无 impact)。"""
+    out, seen = [], set()
+    for s in (analysis or {}).get("news") or []:
+        try:
+            i = int(s.get("idx"))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(news or []) and i not in seen:
+            seen.add(i)
+            out.append({"title": news[i]["title"], "url": news[i]["url"],
+                        "impact": (s.get("impact") or "").strip()})
+    if not out:
+        for n in (news or [])[:5]:
+            out.append({"title": n["title"], "url": n["url"], "impact": ""})
+    return out
+
+
+def build_html(date_str, weekday_cn, indices, up, down, limitup, news, analysis):
     rows = ""
     for x in indices:
         c = color(x["pct"])
@@ -252,9 +286,20 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
     a = analysis or {}
     idx_c = a.get("index_comment", "（AI分析未生成，以上为行情数据。）")
     sec_c = a.get("sector_comment", "")
-    news_c = a.get("news_summary", "")
     strat = a.get("strategy", "")
-    news_html = news_c.replace("\n", "<br>") if news_c else "（暂无）"
+
+    news_items = resolve_news(news, a)
+    if news_items:
+        lis = ""
+        for n in news_items:
+            impact = (f'<br><span style="color:#6b7280;font-size:13px;">— {n["impact"]}</span>'
+                      if n["impact"] else "")
+            lis += (f'<li style="margin-bottom:9px;">'
+                    f'<a href="{n["url"]}" target="_blank" style="color:#2563eb;text-decoration:none;">'
+                    f'{n["title"]}</a>{impact}</li>')
+        news_html = f'<ul style="margin:0;padding-left:20px;line-height:1.6;">{lis}</ul>'
+    else:
+        news_html = "（暂无相关消息）"
 
     pages = os.environ.get("PAGES_BASE", "").rstrip("/")
     share_banner = ""
@@ -376,7 +421,7 @@ def publish_pages(dash, html):
 # ----------------------------------------------------------------------------
 # 5. 微信推送（Server酱，可选；best-effort，失败不影响邮件）
 # ----------------------------------------------------------------------------
-def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, analysis):
+def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, news, analysis):
     """生成完整版微信 markdown（点开消息可看渲染后的表格与全部四部分）。"""
     a = analysis or {}
 
@@ -401,7 +446,14 @@ def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, analysis):
     else:
         sec_block = f"（行业涨跌幅榜暂缺）**涨停集中板块**：{hot_s}"
 
-    news = (a.get("news_summary") or "暂无").replace("\n", "\n\n")
+    news_items = resolve_news(news, a)
+    if news_items:
+        news_md = "\n".join(
+            f'- [{n["title"]}]({n["url"]})' + (f'\n  — {n["impact"]}' if n["impact"] else "")
+            for n in news_items
+        )
+    else:
+        news_md = "暂无相关消息"
 
     pages = os.environ.get("PAGES_BASE", "").rstrip("/")
     share = f"🔗 [在线版（可转发）]({pages}/{date_str}.html)\n\n" if pages else ""
@@ -412,7 +464,7 @@ def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, analysis):
         f"{a.get('index_comment', '')}\n\n"
         f"**涨停家数**：{lu}　**北向资金**：未披露\n\n"
         f"### 二、板块与热点\n{sec_block}\n\n{a.get('sector_comment', '')}\n\n"
-        f"### 三、消息面与政策\n{news}\n\n"
+        f"### 三、消息面与政策\n{news_md}\n\n"
         f"### 四、次日策略提示\n{a.get('strategy', '')}\n\n"
         f"---\n*数据：指数=新浪 板块=同花顺 涨停=东财；分析由DeepSeek生成。"
         f"以上为信息梳理，不构成投资建议。完整带样式版见邮件。*"
@@ -472,7 +524,7 @@ def main():
     news = fetch_news()
     analysis = deepseek_analyze(dash, indices, up, down, limitup, news)
 
-    html = build_html(dash, weekday_cn, indices, up, down, limitup, analysis)
+    html = build_html(dash, weekday_cn, indices, up, down, limitup, news, analysis)
 
     # 发布到 GitHub Pages（生成公开网页，供分享）
     try:
@@ -485,7 +537,7 @@ def main():
     # 微信推送（可选）：上证涨跌作标题
     sse = next((x for x in indices if "上证" in x["name"]), None)
     wtitle = f"A股复盘 {dash}" + (f" 沪指{sse['pct']:+}%" if sse else "")
-    send_wechat(wtitle, build_wechat_md(dash, weekday_cn, indices, up, down, limitup, analysis))
+    send_wechat(wtitle, build_wechat_md(dash, weekday_cn, indices, up, down, limitup, news, analysis))
 
 
 if __name__ == "__main__":
