@@ -246,6 +246,18 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
     hot_line = ("、".join(f'{h["name"]}({h["count"]}家)' for h in hot)
                 if hot else '<span style="color:#9ca3af;">数据暂缺</span>')
 
+    if up or down:
+        sectors_html = (
+            f'<b style="color:#c0392b;">领涨板块：</b>{sector_line(up, "#c0392b")}<br>'
+            f'<b style="color:#27ae60;">领跌板块：</b>{sector_line(down, "#27ae60")}<br>'
+            f'<b>涨停集中板块：</b>{hot_line}<br>'
+        )
+    else:
+        sectors_html = (
+            '<span style="color:#9a3412;font-size:13px;">（行业涨跌幅榜暂未取到，以下为按涨停个股所属行业聚合的热门板块）</span><br>'
+            f'<b>涨停集中板块：</b>{hot_line}<br>'
+        )
+
     a = analysis or {}
     idx_c = a.get("index_comment", "（AI分析未生成，以上为行情数据。）")
     sec_c = a.get("sector_comment", "")
@@ -279,9 +291,7 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
   <div style="background:#fff;padding:20px 24px;border-top:1px solid #f0f0f0;">
     <div style="font-size:17px;font-weight:700;border-left:4px solid #2563eb;padding-left:10px;margin-bottom:14px;">二、板块与热点</div>
     <div style="font-size:14px;line-height:1.9;color:#374151;">
-      <b style="color:#c0392b;">领涨板块：</b>{sector_line(up, "#c0392b")}<br>
-      <b style="color:#27ae60;">领跌板块：</b>{sector_line(down, "#27ae60")}<br>
-      <b>涨停集中板块：</b>{hot_line}<br>
+      {sectors_html}
       <div style="margin-top:8px;">{sec_c}</div>
     </div>
   </div>
