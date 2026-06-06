@@ -84,22 +84,17 @@ def _clean_board_name(name):
 
 
 def _em_board(po):
-    """取东方财富申万行业榜单一方向(po=1涨幅榜/po=0跌幅榜)前10，带重试。
-    注意：pz 必须小(过大如500会返回空body)。"""
-    import time
-    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=12&np=1&fid=f3"
-           "&fs=m:90+t:2&fields=f3,f14&ut=fa5fd1943c7b386f172d6893dbfba10b&po=" + str(po))
+    """取东方财富申万行业榜单一方向(po=1涨幅榜/po=0跌幅榜)。
+    关键：push2 连发到第3次会被限流(502)，所以这里每方向只请求1次，不重试。"""
+    url = ("https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=12&po=" + str(po) +
+           "&np=1&fid=f3&fs=m:90+t:2&fields=f3,f14&ut=fa5fd1943c7b386f172d6893dbfba10b")
     h = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
-    for i in range(4):
-        try:
-            d = requests.get(url, headers=h, timeout=20).json()
-            diff = (d.get("data") or {}).get("diff")
-            if diff:
-                return diff
-        except Exception as e:
-            print(f"sectors po={po} attempt {i} failed:", e)
-        time.sleep(0.8 * (i + 1))
-    return None
+    try:
+        d = requests.get(url, headers=h, timeout=20).json()
+        return (d.get("data") or {}).get("diff")
+    except Exception as e:
+        print(f"sectors po={po} failed:", e)
+        return None
 
 
 def _dedupe_clean(diff):
@@ -115,27 +110,39 @@ def _dedupe_clean(diff):
 
 
 def fetch_sectors():
-    """东方财富申万行业板块涨幅/跌幅榜（已验证海外可达）。"""
+    """东方财富申万行业涨幅/跌幅榜。恰好2次请求(涨/跌)，方向间留间隔避免限流。"""
+    import time
     up = _dedupe_clean(_em_board(1))[:6]
+    time.sleep(1.5)
     down = _dedupe_clean(_em_board(0))[:6]
     if not up and not down:
-        print("sectors: all attempts failed")
+        print("sectors: eastmoney unavailable (will rely on limit-up hot sectors)")
     return up, down
 
 
 def fetch_limitup(ymd):
-    """涨停池家数（东方财富 push2ex）。"""
+    """涨停池（东方财富 push2ex，稳定可达）。返回家数、样例个股，
+    并按个股自带的 hybk 行业字段聚合出"涨停集中板块"。"""
     try:
         u = ("https://push2ex.eastmoney.com/getTopicZTPool?ut=7eea3edcaed734bea9cbfc24409ed989"
              "&dpt=wz.ztzt&Pageindex=0&pagesize=300&sort=fbt%3Aasc&date=" + ymd)
         d = requests.get(u, headers={"User-Agent": "Mozilla/5.0",
                                      "Referer": "https://quote.eastmoney.com/"}, timeout=20).json()
         data = d.get("data") or {}
+        pool = data.get("pool") or []
         cnt = data.get("total")
-        names = [p.get("n") for p in (data.get("pool") or [])][:8]
-        if cnt is None and data.get("pool"):
-            cnt = len(data["pool"])
-        return {"count": cnt, "sampleNames": names}
+        if cnt is None and pool:
+            cnt = len(pool)
+        names = [p.get("n") for p in pool][:8]
+        # 按行业聚合涨停家数
+        agg = {}
+        for p in pool:
+            hy = p.get("hybk")
+            if hy:
+                agg[hy] = agg.get(hy, 0) + 1
+        hot = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)
+        hot_sectors = [{"name": k, "count": v} for k, v in hot if v >= 2][:6]
+        return {"count": cnt, "sampleNames": names, "hotSectors": hot_sectors}
     except Exception as e:
         print("limitup failed:", e)
         return None
@@ -235,6 +242,10 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
         if limitup.get("sampleNames"):
             lu += "（部分：" + "、".join(limitup["sampleNames"][:6]) + "）"
 
+    hot = (limitup or {}).get("hotSectors") or []
+    hot_line = ("、".join(f'{h["name"]}({h["count"]}家)' for h in hot)
+                if hot else '<span style="color:#9ca3af;">数据暂缺</span>')
+
     a = analysis or {}
     idx_c = a.get("index_comment", "（AI分析未生成，以上为行情数据。）")
     sec_c = a.get("sector_comment", "")
@@ -270,6 +281,7 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
     <div style="font-size:14px;line-height:1.9;color:#374151;">
       <b style="color:#c0392b;">领涨板块：</b>{sector_line(up, "#c0392b")}<br>
       <b style="color:#27ae60;">领跌板块：</b>{sector_line(down, "#27ae60")}<br>
+      <b>涨停集中板块：</b>{hot_line}<br>
       <div style="margin-top:8px;">{sec_c}</div>
     </div>
   </div>
@@ -342,6 +354,7 @@ def main():
     print("SECTORS up:", [f'{b["name"]} {b["pct"]:+}%' for b in up])
     print("SECTORS down:", [f'{b["name"]} {b["pct"]:+}%' for b in down])
     limitup = fetch_limitup(ymd)
+    print("HOT(limitup):", [f'{h["name"]}({h["count"]})' for h in (limitup or {}).get("hotSectors", [])])
     news = fetch_news()
     analysis = deepseek_analyze(dash, indices, up, down, limitup, news)
 
