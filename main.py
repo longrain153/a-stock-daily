@@ -256,6 +256,15 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
     strat = a.get("strategy", "")
     news_html = news_c.replace("\n", "<br>") if news_c else "（暂无）"
 
+    pages = os.environ.get("PAGES_BASE", "").rstrip("/")
+    share_banner = ""
+    if pages:
+        share_banner = (
+            f'<div style="background:#eff6ff;border:1px solid #bfdbfe;padding:10px 18px;'
+            f'font-size:13px;color:#1e40af;">🔗 在线版（可转发给朋友）：'
+            f'<a href="{pages}/{date_str}.html" style="color:#2563eb;">{pages}/{date_str}.html</a></div>'
+        )
+
     return f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>A股每日复盘 · {date_str}</title></head>
 <body style="margin:0;padding:0;background:#f4f5f7;font-family:'Microsoft YaHei',-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1f2329;">
@@ -264,6 +273,7 @@ def build_html(date_str, weekday_cn, indices, up, down, limitup, analysis):
     <div style="color:#fff;font-size:22px;font-weight:700;">A股每日复盘 · {date_str}（{weekday_cn}）</div>
     <div style="color:#9ca3af;font-size:13px;margin-top:6px;">收盘后行情梳理 · GitHub Actions 自动生成 · 分析由 DeepSeek 提供</div>
   </div>
+  {share_banner}
 
   <div style="background:#fff;padding:20px 24px;">
     <div style="font-size:17px;font-weight:700;border-left:4px solid #2563eb;padding-left:10px;margin-bottom:14px;">一、大盘指数复盘</div>
@@ -322,6 +332,36 @@ def send_email(subject, html):
 
 
 # ----------------------------------------------------------------------------
+# 4.5 发布到 GitHub Pages（写 docs/ 供工作流提交）
+# ----------------------------------------------------------------------------
+def publish_pages(dash, html):
+    """把当日报告写入 docs/{dash}.html、docs/latest.html，并重建 docs/index.html 列表。"""
+    os.makedirs("docs", exist_ok=True)
+    with open(f"docs/{dash}.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    with open("docs/latest.html", "w", encoding="utf-8") as f:
+        f.write(html)
+    files = sorted([fn for fn in os.listdir("docs")
+                    if re.match(r"\d{4}-\d{2}-\d{2}\.html$", fn)], reverse=True)
+    items = "\n".join(f'<li><a href="{fn}">{fn[:-5]}</a></li>' for fn in files)
+    index = (
+        '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>A股每日复盘</title></head>'
+        '<body style="font-family:-apple-system,Microsoft YaHei,sans-serif;max-width:680px;'
+        'margin:0 auto;padding:24px;color:#1f2329;">'
+        '<h2>📊 A股每日复盘 · 历史报告</h2>'
+        '<p><a href="latest.html"><b>👉 查看最近一期</b></a></p>'
+        f'<ul style="line-height:2;">{items}</ul>'
+        '<p style="color:#9ca3af;font-size:12px;">每个交易日 18:00 自动更新 · '
+        '数据仅供参考，不构成投资建议</p></body></html>'
+    )
+    with open("docs/index.html", "w", encoding="utf-8") as f:
+        f.write(index)
+    print("pages published:", dash)
+
+
+# ----------------------------------------------------------------------------
 # 5. 微信推送（Server酱，可选；best-effort，失败不影响邮件）
 # ----------------------------------------------------------------------------
 def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, analysis):
@@ -351,7 +391,11 @@ def build_wechat_md(date_str, weekday_cn, indices, up, down, limitup, analysis):
 
     news = (a.get("news_summary") or "暂无").replace("\n", "\n\n")
 
+    pages = os.environ.get("PAGES_BASE", "").rstrip("/")
+    share = f"🔗 [在线版（可转发）]({pages}/{date_str}.html)\n\n" if pages else ""
+
     md = (
+        f"{share}"
         f"### 一、大盘指数复盘\n{idx_table}\n\n"
         f"{a.get('index_comment', '')}\n\n"
         f"**涨停家数**：{lu}　**北向资金**：未披露\n\n"
@@ -417,6 +461,13 @@ def main():
     analysis = deepseek_analyze(dash, indices, up, down, limitup, news)
 
     html = build_html(dash, weekday_cn, indices, up, down, limitup, analysis)
+
+    # 发布到 GitHub Pages（生成公开网页，供分享）
+    try:
+        publish_pages(dash, html)
+    except Exception as e:
+        print("publish_pages failed:", e)
+
     send_email(f"A股每日复盘 {dash}", html)
 
     # 微信推送（可选）：上证涨跌作标题
