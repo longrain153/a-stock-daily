@@ -6,6 +6,11 @@ on:
     # 注意：GitHub Actions 定时任务可能因负载延迟若干分钟，属正常现象。
     - cron: "0 10 * * 1-5"
   workflow_dispatch:        # 支持在 Actions 页面手动触发（用于测试）
+    inputs:
+      force:
+        description: "强制发送（即便当天休市，用最近收盘数据测试）"
+        type: boolean
+        default: true
 
 # 避免同一时刻重复运行
 concurrency:
@@ -34,4 +39,5 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
+          FORCE_SEND: ${{ github.event.inputs.force }}
         run: python main.py

@@ -284,15 +284,27 @@ def main():
     weekday_cn = "一二三四五六日"[now.weekday()]
     weekday_cn = "周" + weekday_cn
 
+    force = os.environ.get("FORCE_SEND", "").lower() in ("1", "true", "yes")
+
     indices, data_date = fetch_indices()
 
     # 交易日判断：若指数数据日期与今天不一致（或无数据），视为休市/异常 -> 不发送
+    # FORCE_SEND=1（手动测试）时跳过此判断，强制用最近收盘数据发送
     if not indices:
         print("no index data; abort.")
         return
-    if data_date and data_date != dash:
+    if data_date and data_date != dash and not force:
         print(f"market closed today (data date {data_date} != {dash}); skip sending.")
         return
+    if data_date and data_date != dash and force:
+        print(f"FORCE_SEND on: sending with latest close data dated {data_date}.")
+        dash = data_date  # 报告标题用真实数据日期
+        try:
+            d = dt.datetime.strptime(data_date, "%Y-%m-%d")
+            weekday_cn = "周" + "一二三四五六日"[d.weekday()]
+            ymd = d.strftime("%Y%m%d")
+        except Exception:
+            pass
 
     up, down = fetch_sectors()
     limitup = fetch_limitup(ymd)
