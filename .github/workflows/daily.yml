@@ -2,9 +2,9 @@ name: A股每日复盘
 
 on:
   schedule:
-    # GitHub cron 用 UTC；北京时间 18:00 = UTC 10:00。工作日（周一至周五）运行。
-    # 注意：GitHub Actions 定时任务可能因负载延迟若干分钟，属正常现象。
-    - cron: "0 10 * * 1-5"
+    # 北京时间约 18:08 = UTC 10:08（前者已收盘且数据就绪）。工作日（周一至周五）。
+    # 用非整点(:08)避开 GitHub 定时整点拥堵导致的延迟/跳过；仍可能有几分钟波动。
+    - cron: "8 10 * * 1-5"
   workflow_dispatch:        # 支持在 Actions 页面手动触发（用于测试）
     inputs:
       force:
