@@ -498,6 +498,11 @@ def main():
 
     force = os.environ.get("FORCE_SEND", "").lower() in ("1", "true", "yes")
 
+    # 去重：定时触发时若今天已发布过，则跳过（多个 cron 冗余触发，只发一次）
+    if os.environ.get("SKIP_IF_DONE") and os.path.exists(f"docs/{dash}.html"):
+        print(f"{dash} already published today; skip (idempotent).")
+        return
+
     indices, data_date = fetch_indices()
 
     # 交易日判断：若指数数据日期与今天不一致（或无数据），视为休市/异常 -> 不发送

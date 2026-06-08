@@ -2,9 +2,11 @@ name: A股每日复盘
 
 on:
   schedule:
-    # 北京时间约 18:08 = UTC 10:08（前者已收盘且数据就绪）。工作日（周一至周五）。
-    # 用非整点(:08)避开 GitHub 定时整点拥堵导致的延迟/跳过；仍可能有几分钟波动。
+    # 北京约 18:08 / 18:23 / 18:38 三次冗余触发（UTC 10:08/10:23/10:38）。工作日。
+    # GitHub 定时常丢任务，多触发几次提高命中率；配合 SKIP_IF_DONE 去重，当天只发一次。
     - cron: "8 10 * * 1-5"
+    - cron: "23 10 * * 1-5"
+    - cron: "38 10 * * 1-5"
   workflow_dispatch:        # 支持在 Actions 页面手动触发（用于测试）
     inputs:
       force:
@@ -45,6 +47,7 @@ jobs:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
           PAGES_BASE: https://longrain153.github.io/a-stock-daily
           FORCE_SEND: ${{ github.event.inputs.force }}
+          SKIP_IF_DONE: ${{ github.event_name == 'schedule' && '1' || '' }}
         run: python main.py
 
       - name: Publish report to GitHub Pages
